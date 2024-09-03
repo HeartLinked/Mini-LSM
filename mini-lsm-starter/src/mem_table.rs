@@ -74,7 +74,7 @@ impl MemTable {
 
     /// Get a value by key.
     pub fn get(&self, _key: &[u8]) -> Option<Bytes> {
-        let get_entry = (*self.map).get(_key);
+        let get_entry = self.map.get(_key);
         match get_entry {
             Some(entry) => Some(entry.value().clone()),
             None => None,
@@ -89,6 +89,8 @@ impl MemTable {
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
         let key = Bytes::copy_from_slice(_key);
         let value = Bytes::copy_from_slice(_value);
+        self.approximate_size
+            .fetch_add(key.len() + value.len(), std::sync::atomic::Ordering::SeqCst);
         self.map.insert(key, value);
         Ok(())
     }
