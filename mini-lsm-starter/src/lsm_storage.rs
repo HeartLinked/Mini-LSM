@@ -15,9 +15,11 @@ use crate::compact::{
     CompactionController, CompactionOptions, LeveledCompactionController, LeveledCompactionOptions,
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
+use crate::iterators::merge_iterator::MergeIterator;
+use crate::iterators::StorageIterator;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
-use crate::mem_table::MemTable;
+use crate::mem_table::{MemTable, MemTableIterator};
 use crate::mvcc::LsmMvccInner;
 use crate::table::SsTable;
 
@@ -424,6 +426,21 @@ impl LsmStorageInner {
         _lower: Bound<&[u8]>,
         _upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
-        unimplemented!()
+        let state = self.state.read();
+
+        let memtable = state.as_ref().memtable.as_ref();
+        let memtable_iter = memtable.scan(_lower, _upper);
+        let mut iters = vec![Box::new(memtable_iter)];
+
+        for imm_memtable in &state.imm_memtables {
+            let imm_memtable = Arc::as_ref(imm_memtable);
+            let imm_memtable_iter = imm_memtable.scan(_lower, _upper);
+            iters.push(Box::new(imm_memtable_iter));
+            // 这里可以使用 imm_memtable_ref
+        }
+        let lsm_iterator_inner = MergeIterator::create(iters);
+        let mut iter = LsmIterator::new(lsm_iterator_inner)?;
+        iter.skip_delete_key().unwrap();
+        Ok(FusedIterator::new(iter))
     }
 }
