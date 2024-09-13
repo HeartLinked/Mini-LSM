@@ -17,7 +17,9 @@ pub struct LsmIterator {
 
 impl LsmIterator {
     pub(crate) fn new(iter: LsmIteratorInner) -> Result<Self> {
-        Ok(Self { inner: iter })
+        let mut res = Self { inner: iter };
+        res.skip_delete_key().unwrap();
+        Ok(res)
     }
 
     pub fn skip_delete_key(&mut self) -> Result<()> {

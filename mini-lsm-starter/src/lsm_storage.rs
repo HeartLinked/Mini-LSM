@@ -427,20 +427,19 @@ impl LsmStorageInner {
         _upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
         let state = self.state.read();
-
+        // memtable
         let memtable = state.as_ref().memtable.as_ref();
         let memtable_iter = memtable.scan(_lower, _upper);
         let mut iters = vec![Box::new(memtable_iter)];
-
+        // imm_memtable
         for imm_memtable in &state.imm_memtables {
             let imm_memtable = Arc::as_ref(imm_memtable);
             let imm_memtable_iter = imm_memtable.scan(_lower, _upper);
             iters.push(Box::new(imm_memtable_iter));
-            // 这里可以使用 imm_memtable_ref
         }
+        // 用 vec 创建
         let lsm_iterator_inner = MergeIterator::create(iters);
         let mut iter = LsmIterator::new(lsm_iterator_inner)?;
-        iter.skip_delete_key().unwrap();
         Ok(FusedIterator::new(iter))
     }
 }
