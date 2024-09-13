@@ -1,3 +1,4 @@
+#![allow(warnings)]
 pub mod block;
 pub mod compact;
 pub mod debug;
