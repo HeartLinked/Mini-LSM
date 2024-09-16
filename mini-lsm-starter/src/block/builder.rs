@@ -1,9 +1,6 @@
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use super::Block;
 use crate::key::{KeySlice, KeyVec};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::BufMut;
 
 /// Builds a block.
 pub struct BlockBuilder {
@@ -45,17 +42,13 @@ impl BlockBuilder {
                 return false;
             }
         }
-        // 获取 key 和 value 的字节切片
-        let key_bytes = key.raw_ref();
-        let value_bytes = value;
-        // 获取 key 和 value 的长度
-        let key_len = (key_bytes.len() as u16); // 包含 2 个元素为 u8 的数组， [u8, 2]
-        let value_len = (value_bytes.len() as u16); // 包含 2 个元素为 u8 的数组， [u8, 2]
-        self.data.extend_from_slice(&key_len.to_le_bytes());
-        self.data.extend_from_slice(key_bytes);
 
-        self.data.extend_from_slice(&value_len.to_le_bytes());
-        self.data.extend_from_slice(value_bytes);
+        self.offsets.push(self.data.len() as u16);
+        self.data.put_u16(key.len() as u16);
+        self.data.put_slice(key.raw_ref());
+
+        self.data.put_u16(value.len() as u16);
+        self.data.put_slice(value);
         true
     }
 
