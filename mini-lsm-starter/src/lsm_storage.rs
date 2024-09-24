@@ -1,5 +1,3 @@
-#![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
-
 use std::collections::HashMap;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -16,10 +14,9 @@ use crate::compact::{
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
 use crate::iterators::merge_iterator::MergeIterator;
-use crate::iterators::StorageIterator;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
-use crate::mem_table::{MemTable, MemTableIterator};
+use crate::mem_table::MemTable;
 use crate::mvcc::LsmMvccInner;
 use crate::table::SsTable;
 
@@ -439,7 +436,7 @@ impl LsmStorageInner {
         }
         // 用 vec 创建
         let lsm_iterator_inner = MergeIterator::create(iters);
-        let mut iter = LsmIterator::new(lsm_iterator_inner)?;
+        let iter = LsmIterator::new(lsm_iterator_inner)?;
         Ok(FusedIterator::new(iter))
     }
 }

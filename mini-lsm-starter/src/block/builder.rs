@@ -38,7 +38,6 @@ impl BlockBuilder {
             if self.offsets.len() * 2 + self.data.len() + size_add + NUM_OF_ELEMENTS_LEN
                 > self.block_size
             {
-                println!("---------OVERFLOW!--------------");
                 return false;
             }
         }

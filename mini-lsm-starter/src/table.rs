@@ -5,11 +5,13 @@ pub(crate) mod bloom;
 mod builder;
 mod iterator;
 
+use bytes::Bytes;
 use std::fs::File;
+use std::io::{Read, Seek};
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 pub use builder::SsTableBuilder;
 use bytes::Buf;
 pub use iterator::SsTableIterator;
@@ -21,6 +23,8 @@ use crate::lsm_storage::BlockCache;
 use self::bloom::Bloom;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// you will need to maintain block metadata BlockMeta,
+/// which includes the first/last keys in each block and the offsets of each block.
 pub struct BlockMeta {
     /// Offset of this data block.
     pub offset: usize,
@@ -39,12 +43,47 @@ impl BlockMeta {
         #[allow(clippy::ptr_arg)] // remove this allow after you finish
         buf: &mut Vec<u8>,
     ) {
-        unimplemented!()
+        for meta in block_meta {
+            // 编码 offset，使用 8 字节（u64）来存储
+            buf.extend_from_slice(&(meta.offset as u64).to_le_bytes());
+            // 编码 first_key 的长度和内容
+            let first_key_len = meta.first_key.raw_ref().len() as u64;
+            buf.extend_from_slice(&first_key_len.to_le_bytes());
+            buf.extend_from_slice(meta.first_key.raw_ref());
+            // 编码 last_key 的长度和内容
+            let last_key_len = meta.last_key.raw_ref().len() as u64;
+            buf.extend_from_slice(&last_key_len.to_le_bytes());
+            buf.extend_from_slice(meta.last_key.raw_ref());
+        }
     }
 
     /// Decode block meta from a buffer.
     pub fn decode_block_meta(buf: impl Buf) -> Vec<BlockMeta> {
-        unimplemented!()
+        let mut block_metas = Vec::new();
+        let mut buf = buf; // 不需要将 `buf` 声明为可变，因为 Buf trait 是内部可变的
+        while buf.remaining() > 0 {
+            // 解码 offset（8 字节）
+            let offset = buf.get_u64_le() as usize;
+
+            // 解码 first_key 的长度（8 字节），然后读取 first_key
+            let first_key_len = buf.get_u64_le() as usize;
+            let mut first_key = vec![0; first_key_len];
+            buf.copy_to_slice(&mut first_key);
+
+            // 解码 last_key 的长度（8 字节），然后读取 last_key
+            let last_key_len = buf.get_u64_le() as usize;
+            let mut last_key = vec![0; last_key_len];
+            buf.copy_to_slice(&mut last_key);
+
+            // 构建 BlockMeta 并推入列表
+            block_metas.push(BlockMeta {
+                offset,
+                first_key: KeyBytes::from_bytes(Bytes::from(first_key)),
+                last_key: KeyBytes::from_bytes(Bytes::from(last_key)),
+            });
+        }
+
+        block_metas
     }
 }
 
@@ -108,7 +147,40 @@ impl SsTable {
 
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
-        unimplemented!()
+        let (mut file, file_size) = match file.0 {
+            Some(f) => (f, file.1),
+            None => return Err(anyhow!("file not exists")),
+        };
+
+        let mut bytes = vec![0; file_size as usize];
+        file.read_exact(&mut bytes)?;
+
+        const U32_SIZE: usize = size_of::<u32>();
+        let block_meta_offset = (&bytes[bytes.len() - U32_SIZE..]).get_u32() as usize;
+
+        let block_meta = &bytes[block_meta_offset..bytes.len() - U32_SIZE];
+        let block_meta = BlockMeta::decode_block_meta(block_meta);
+        let first_key = block_meta
+            .first()
+            .map(|meta| meta.first_key.clone())
+            .unwrap_or_default();
+        let last_key = block_meta
+            .last()
+            .map(|meta| meta.last_key.clone())
+            .unwrap_or_default();
+
+        file.rewind()?;
+        Ok(Self {
+            file: FileObject(Some(file), file_size),
+            block_meta,
+            block_meta_offset,
+            id,
+            block_cache,
+            first_key,
+            last_key,
+            bloom: None,
+            max_ts: 0,
+        })
     }
 
     /// Create a mock SST with only first key + last key metadata

@@ -1,13 +1,9 @@
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 mod builder;
 mod iterator;
 
 pub use builder::BlockBuilder;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 pub use iterator::BlockIterator;
-use std::mem::size_of;
 
 /// A block is the smallest unit of read and caching in LSM tree. It is a collection of sorted key-value pairs.
 pub struct Block {
@@ -51,5 +47,29 @@ impl Block {
             data: data_part.to_vec(),
             offsets,
         }
+    }
+
+    pub fn first_key(&self) -> Option<Bytes> {
+        let offset = match self.offsets.first() {
+            Some(offset) => *offset as usize,
+            None => return None,
+        };
+
+        let mut data = &self.data[offset..];
+        let len = data.get_u16() as usize;
+
+        Some(Bytes::copy_from_slice(&data[..len]))
+    }
+
+    pub fn last_key(&self) -> Option<Bytes> {
+        let offset = match self.offsets.last() {
+            Some(offset) => *offset as usize,
+            None => return None,
+        };
+
+        let mut data = &self.data[offset..];
+        let len = data.get_u16() as usize;
+
+        Some(Bytes::copy_from_slice(&data[..len]))
     }
 }

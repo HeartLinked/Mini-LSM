@@ -21,7 +21,7 @@ pub struct BlockIterator {
 }
 
 impl BlockIterator {
-    fn new(block: Arc<Block>) -> Self {
+    pub fn new(block: Arc<Block>) -> Self {
         let mut iter = Self {
             block,
             key: KeyVec::new(),
