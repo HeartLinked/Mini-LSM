@@ -7,7 +7,8 @@ mod iterator;
 
 use bytes::Bytes;
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, SeekFrom};
+use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -38,11 +39,7 @@ impl BlockMeta {
     /// Encode block meta to a buffer.
     /// You may add extra fields to the buffer,
     /// in order to help keep track of `first_key` when decoding from the same buffer in the future.
-    pub fn encode_block_meta(
-        block_meta: &[BlockMeta],
-        #[allow(clippy::ptr_arg)] // remove this allow after you finish
-        buf: &mut Vec<u8>,
-    ) {
+    pub fn encode_block_meta(block_meta: &[BlockMeta], buf: &mut Vec<u8>) {
         for meta in block_meta {
             // 编码 offset，使用 8 字节（u64）来存储
             buf.extend_from_slice(&(meta.offset as u64).to_le_bytes());
@@ -205,7 +202,24 @@ impl SsTable {
 
     /// Read a block from the disk.
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
-        unimplemented!()
+        let file = match &self.file.0 {
+            Some(f) => f,
+            None => return Err(anyhow!("File not exists")),
+        };
+
+        let (start, length) = match (
+            self.block_meta.get(block_idx),
+            self.block_meta.get(block_idx + 1),
+        ) {
+            (Some(fir), Some(sec)) => (fir.offset, sec.offset - fir.offset),
+            (Some(fir), None) => (fir.offset, self.block_meta_offset - fir.offset),
+            _ => return Ok(Arc::default()),
+        };
+
+        let mut buffer = vec![0; length];
+        file.read_exact_at(&mut buffer, start as u64)?;
+
+        Ok(Arc::new(Block::decode(&buffer)))
     }
 
     /// Read a block from disk, with block cache. (Day 4)
@@ -217,7 +231,9 @@ impl SsTable {
     /// Note: You may want to make use of the `first_key` stored in `BlockMeta`.
     /// You may also assume the key-value pairs stored in each consecutive block are sorted.
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
-        unimplemented!()
+        self.block_meta
+            .binary_search_by_key(&key, |b| b.first_key.as_key_slice())
+            .unwrap_or_else(|idx| idx)
     }
 
     /// Get number of data blocks.

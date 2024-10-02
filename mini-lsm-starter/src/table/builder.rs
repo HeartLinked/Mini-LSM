@@ -43,8 +43,8 @@ impl SsTableBuilder {
         if self.builder.add(key, value) == false {
             // block 满，添加失败，创建新 block
             self.split_new_block();
+            let _ = self.builder.add(key, value);
         }
-        let _ = self.builder.add(key, value);
     }
 
     fn split_new_block(&mut self) {
