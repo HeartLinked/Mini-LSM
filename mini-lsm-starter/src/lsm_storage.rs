@@ -14,11 +14,14 @@ use crate::compact::{
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
 use crate::iterators::merge_iterator::MergeIterator;
+use crate::iterators::two_merge_iterator::TwoMergeIterator;
+use crate::iterators::StorageIterator;
+use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
 use crate::mvcc::LsmMvccInner;
-use crate::table::SsTable;
+use crate::table::{SsTable, SsTableIterator};
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -423,20 +426,80 @@ impl LsmStorageInner {
         _lower: Bound<&[u8]>,
         _upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
-        let state = self.state.read();
-        // memtable
-        let memtable = state.as_ref().memtable.as_ref();
-        let memtable_iter = memtable.scan(_lower, _upper);
-        let mut iters = vec![Box::new(memtable_iter)];
-        // imm_memtable
-        for imm_memtable in &state.imm_memtables {
-            let imm_memtable = Arc::as_ref(imm_memtable);
-            let imm_memtable_iter = imm_memtable.scan(_lower, _upper);
-            iters.push(Box::new(imm_memtable_iter));
+        // let state = self.state.read();
+        // // memtable
+        // let memtable = state.as_ref().memtable.as_ref();
+        //
+        // let memtable_iter = memtable.scan(_lower, _upper);
+        // let mut iters = vec![Box::new(memtable_iter)];
+        // // imm_memtable
+        // for imm_memtable in &state.imm_memtables {
+        //     let imm_memtable = Arc::as_ref(imm_memtable);
+        //     let imm_memtable_iter = imm_memtable.scan(_lower, _upper);
+        //     iters.push(Box::new(imm_memtable_iter));
+        // }
+        // // 用 vec 创建
+        // let memtable_iterator = MergeIterator::create(iters);
+        // // SST
+        // let l0_sst = &state.as_ref().l0_sstables;
+        // let mut sst_iters = vec![];
+        // for sst in l0_sst {
+        //     let sst_ptr = state.sstables.get(sst).unwrap();
+        //     let sst_iter = SsTableIterator::create_and_seek_to_first(sst_ptr.clone())?;
+        //     sst_iters.push(Box::new(sst_iter));
+        // }
+        // let sst_iterator = MergeIterator::create(sst_iters);
+        // let lsm_iterator_inner = TwoMergeIterator::create(memtable_iterator, sst_iterator)?;
+        // let iter = LsmIterator::new(lsm_iterator_inner, _upper)?;
+        // Ok(FusedIterator::new(iter))
+        let state = {
+            let guard = self.state.read();
+            Arc::clone(&guard)
+        };
+        let mut mem_iters = vec![];
+        mem_iters.push(Box::new(state.memtable.scan(_lower, _upper)));
+        mem_iters.append(
+            &mut state
+                .imm_memtables
+                .clone()
+                .into_iter()
+                .map(|m| Box::new(m.scan(_lower, _upper)))
+                .collect(),
+        );
+
+        let mut sst_iters = vec![];
+        let key_slice = match _lower {
+            Bound::Included(x) => KeySlice::from_slice(x),
+            Bound::Excluded(x) => KeySlice::from_slice(x),
+            Bound::Unbounded => KeySlice::default(),
+        };
+        for idx in &state.l0_sstables {
+            let sst_table = match state.sstables.get(idx) {
+                Some(sst_table) => sst_table.clone(),
+                None => continue,
+            };
+            let iter = {
+                let mut iter = SsTableIterator::create_and_seek_to_key(sst_table, key_slice)?;
+                if let Bound::Excluded(x) = _lower {
+                    if x == key_slice.raw_ref() {
+                        iter.next()?;
+                    }
+                }
+                if !iter.is_valid() {
+                    continue;
+                }
+                iter
+            };
+            sst_iters.push(Box::new(iter));
         }
-        // 用 vec 创建
-        let lsm_iterator_inner = MergeIterator::create(iters);
-        let iter = LsmIterator::new(lsm_iterator_inner)?;
+
+        let iter = LsmIterator::new(
+            TwoMergeIterator::create(
+                MergeIterator::create(mem_iters),
+                MergeIterator::create(sst_iters),
+            )?,
+            _upper,
+        )?;
         Ok(FusedIterator::new(iter))
     }
 }

@@ -66,7 +66,7 @@ impl<
                     self.a.next()
                 } else if self.a.key() == self.b.key() {
                     self.a.next()?;
-                    self.b.next()  // 如果 key 相等，则两个迭代器都要增加
+                    self.b.next() // 如果 key 相等，则两个迭代器都要增加
                 } else {
                     self.b.next()
                 }
